@@ -15,4 +15,4 @@ To clone and install the project, run:
 
 After this procedure, there should be the executable at
 `.cabal-sandbox/bin/CombinatoryCalculator`. Also, CombinatoryCalculator can be
-used as a DSL in GHCI by running `ghci src/CombinatoryCalculator`.
+used as a DSL in GHCI by running `ghci src/CombinatoryCalculator.hs`.
