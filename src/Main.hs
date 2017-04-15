@@ -23,6 +23,7 @@ module Main where
                 "-o"        -> f $ TraceNPolish (read x) $ fromString $ head xs
                 "-r"        -> f $ Reduce       $ fromString x
                 "-v"        -> visualize x $ g xs
+                "-w"        -> visualize2 x $ g xs
                 _           -> f $ "Unknown command \"" ++ command ++ "\"."
 
 
