@@ -64,6 +64,13 @@ where
         'I'     -> Just I
         _       -> Nothing
 
+    infixl 1 `apply`
+
+    -- |Given two Expressions, e, and f, returns expression (ef). This operation
+    -- preceeds the standard operator $.
+    apply               :: Expression -> Expression -> Expression
+    apply e f           = A:e ++ f
+
     -- TODO: Figure out how Read works. This is not very beautiful as it is:
     -- |A helper function for reading a string as an Expression. Symbols other
     -- than '*', 'S', 'K', or 'I' will be silently discarded.
@@ -131,8 +138,8 @@ where
 
     -- |Transforms a ParseTree into a FancyTree.
     decorate                :: ParseTree -> [Bool] -> FancyTree
-    decorate (App t u) os   = FApp os (decorate t (os ++ [True]))
-                                (decorate u (os ++ [False]))
+    decorate (App t u) os   =
+        FApp os (decorate t (os ++ [True])) (decorate u (os ++ [False]))
     decorate (Atom x) os    = FAtom os x
 
     -- |A helper function for transforming Expressions into FancyTrees.
@@ -163,7 +170,7 @@ where
 
     -- |Finds the reducible subexpressions of the given Expression, if possible.
     tryRedexes          :: Expression -> Maybe [ParseTree]
-    tryRedexes e        = tryParse e >>= (\x -> Just $ redexes x)
+    tryRedexes e        = redexes <$> tryParse e
 
     tryAnalyze          :: Expression -> Maybe String
     tryAnalyze e        = case tryParse e of
@@ -193,17 +200,16 @@ where
     step t@(App u v)
         | redex t       = w t
         | otherwise     =
-            let x       = step u
-            in  if x /= u then App x v else App u $ step v
+            let x       = step u in if x /= u then App x v else App u $ step v
     step t              = t
+
+    -- TODO: Implement a 'stepr' that steps in applicative order.
 
     -- |Performs the given number of steps with the given Expression.
     stepN               :: Int -> ParseTree -> ParseTree
-    stepN n
-        | n == 0        = id
-        | otherwise     = \t ->
-            let u       = step t
-            in  if u == t then u else stepN (n - 1) u
+    stepN 0             = id
+    stepN n             = \t ->
+        let u = step t in  if u == t then u else stepN (n - 1) u
 
     -- |Like stepN, but prints the intermediary results. The first component of
     -- the (Int, Int) pair is the number of steps and the second one is a
@@ -224,15 +230,18 @@ where
     -- |Tries to perform a single step of reduction on the given Expression, if
     -- possible.
     tryStep             :: Expression -> Maybe ParseTree
-    tryStep e           = tryParse e >>= (\t -> Just $ step t)
+--    tryStep e           = tryParse e >>= (\t -> Just $ step t)
+--    tryStep e           = Just (\x -> step x) <*> (tryParse e)
+--    tryStep e           = tryParse e >>= (\t -> return $ step t)
+    tryStep e           = step <$> tryParse e
 
     -- |Tries to perform multiple steps on the given Expression, if possible.
     tryStepN            :: Int -> Expression -> Maybe ParseTree
-    tryStepN n e        = tryParse e >>= (\t -> Just $ stepN n t)
+    tryStepN n e        = stepN n <$> tryParse e
 
     -- |Like tryStepN, but prints the intermediary steps.
     tryTraceN           :: Int -> Expression -> Maybe ParseTree
-    tryTraceN n e       = tryParse e >>= (\t -> Just $ traceN (n,0) t)
+    tryTraceN n e       = traceN (n,0) <$> tryParse e
 
     -- |Produces a list of ParseTrees of exactly the given length by iterating
     -- step on the given Expression.
@@ -241,19 +250,20 @@ where
 
     -- |Applies stepNList with the given length and Expression, if possible.
     tryStepNList        :: Int -> Expression -> Maybe [ParseTree]
-    tryStepNList n e    = tryParse e >>= (\t -> Just $ stepNList n t)
+    tryStepNList n e    = stepNList n <$> tryParse e
 
     -- |Like tryTraceN, but uses Polish notation for output.
     tryTraceNPolish     :: Int -> Expression -> Maybe Expression
     tryTraceNPolish n e = tryParse e >>= (\t ->
-        Just $ fromParseTree $ snd $ last $
-        let f n t       = (show n) ++ ":\t" ++ (show $ fromParseTree t)
-            g (n,t)     = (n + 1, trace (f n t) $ step t)
-        in  takeWhile (\(k,_) -> k - 1 <= n) $ iterate g (0,t))
+        (Just . fromParseTree . snd . last) $
+        let f n u       = (show n) ++ ":\t" ++ (show $ fromParseTree u)
+            g (n,u)     = (n + 1, trace (f n u) $ step u)
+            h (k,v)     = k - 1 <= n
+        in  takeWhile h $ iterate g (0,t))
 
     -- |Tries to reduce the given Expression, if possible.
     tryReduce           :: Expression -> Maybe ParseTree
-    tryReduce e         = tryParse e >>= (\x -> Just $ reduce x)
+    tryReduce e         = reduce <$> tryParse e
 
     -- |This helper function performs the given operation on the given
     -- expression, getting rid of the Maybe monad, and returning a String.
@@ -308,13 +318,29 @@ where
             Reduce e            -> perform tryReduce e
 --            _               -> "Unsupported command."
 
+    -- | For convenience, this variable refers to expression [S].
+    s       :: Expression
+    s       = [S]
+
+    -- | For convenience, this variable refers to expression [K].
+    k       :: Expression
+    k       = [K]
+
+    -- | For convenience, this variable refers to expression [I].
+    i       :: Expression
+    i       = [I]
+
+    -- |The I combinator is extensionally equivalent to SKK.
+    i'      :: Expression
+    i'      = [A,A,S,K,K]
+
     -- |Omega is the reducible expression (SII)(SII), for which holds that:
     -- Omega    === (SII)(SII)
     --          ->w (I(SII))(I(SII))
-    --          ->w (SII)(I(SII))
+    --          ->w (I(SII))(SII)
     --          ->w (SII)(SII)
     --          === Omega
-    -- Thus, Omega ->w* Omega. Omega is analogous to (\x->xx)(\x->xx) in LC.
+    -- when using applicative reduction order. Thus, Omega ->w* Omega.
     -- However, since this interpreter uses normal reduction order, we get:
     -- Omega    === (SII)(SII)
     --          ->w (I(SII))(I(SII))
@@ -324,6 +350,7 @@ where
     --          ->w (SII)(I(I(SII)))
     --          ->w (I(I(I(SII))))(I(I(I(SII))))
     --          ...
+    --  Omega is analogous to (\x->xx)(\x->xx) in LC.
     omega   :: Expression
     omega   = [A,A,A,S,I,I,A,A,S,I,I]
 
@@ -336,16 +363,12 @@ where
     theta   :: Expression
     theta   = fromString "***S*K**SS*S**SIIK**S*K**SS*S**SIIK"
 
-    -- |The I combinator is extensionally equivalent to SKK.
-    i       :: Expression
-    i       = [A,A,S,K,K]
-
     -- |T combinator can used for repsesenting truth in an if-then else
     -- expression. For example, the C-style ternary operator
     -- <condition> ? <then-branch> : <else-branch> can be encoded simply as
     -- P <then-branch> <else-branch> where P is either T or F.
     t       :: Expression
-    t       = [K]
+    t       = k
     -- |F combinator can used for repsesenting falsity in an if-then else
     -- expression.
     f       :: Expression
