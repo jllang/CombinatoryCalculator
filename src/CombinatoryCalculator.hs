@@ -27,16 +27,13 @@
 -- SKI-combinatory calculus of the form "(e f)" translates into [A,e,f].
 module CombinatoryCalculator
 (
-    Symbol(..), Expression, ParseTree, FancyTree, Command(..), fromString
+    Symbol(..), Expression, ParseTree, FancyTree, Command(..),
+    fromString, fromParseTree, tryStepNList
 )
 where
 
     import Data.List
     import Debug.Trace
-
-    -- TODO: Implement Dijkstra's Shunting Yard or something for converting
-    -- ParseTrees into Expressions. Then, it will be easy to implement Polish
-    -- stepNTrace.
 
     -- |The language of this system contains three symbols: The combinator
     -- symbols S, K, and I, and the application symbol A.
@@ -92,6 +89,11 @@ where
                           -- |App node has exactly two subtrees.
                         | App ParseTree ParseTree
                         deriving Eq
+
+    -- |Converts a ParseTree to an Expression.
+    fromParseTree           :: ParseTree -> Expression
+    fromParseTree (Atom x)  = [x]
+    fromParseTree (App t u) = A : (fromParseTree t) ++ (fromParseTree u)
 
     -- |Shows the ParseTree as an expression of classical combinatory calculus
     -- with minimal number of parentheses.
@@ -185,32 +187,33 @@ where
     -- |Performs a single step of reduction using the w reduction function. The
     -- step is performed using normal evaluation order, which means that the
     -- parent node has higher priority than its child nodes, and the left child
-    -- has higher priority than the right child.
+    -- has higher priority than the right child. If the given ParseTree doesn't
+    -- contain any reducible subtrees, then this function returns the argument.
     step                :: ParseTree -> ParseTree
     step t@(App u v)
         | redex t       = w t
         | otherwise     =
             let x       = step u
-            in if x /= u then App x v else App u $ step v
+            in  if x /= u then App x v else App u $ step v
     step t              = t
 
-    -- Performs the given number of steps with the given Expression.
+    -- |Performs the given number of steps with the given Expression.
     stepN               :: Int -> ParseTree -> ParseTree
     stepN n
         | n == 0        = id
         | otherwise     = \t ->
             let u       = step t
-            in if u == t then u else stepN (n - 1) u
+            in  if u == t then u else stepN (n - 1) u
 
-    -- Like stepN, but prints the intermediary results. The first component of
+    -- |Like stepN, but prints the intermediary results. The first component of
     -- the (Int, Int) pair is the number of steps and the second one is a
     -- counter used for printing the ordinals of the steps.
-    stepNTrace          :: (Int, Int) -> ParseTree -> ParseTree
-    stepNTrace (n,k)
+    traceN              :: (Int, Int) -> ParseTree -> ParseTree
+    traceN (n,k)
         | n == 0        = \t -> trace ((show k) ++ ":\t" ++ (show t)) t
         | otherwise     = \t -> trace ((show k) ++ ":\t" ++ (show t)) $
             let u       = step t
-            in  if u == t then u else stepNTrace (n - 1, k + 1) u
+            in  if u == t then u else traceN (n - 1, k + 1) u
 
     -- |Performs all the available reduction steps for the given Expression.
     -- This function will not return if the Expression doesn't have a w-normal
@@ -221,15 +224,32 @@ where
     -- |Tries to perform a single step of reduction on the given Expression, if
     -- possible.
     tryStep             :: Expression -> Maybe ParseTree
-    tryStep e           = tryParse e >>= (\x -> Just $ step x)
+    tryStep e           = tryParse e >>= (\t -> Just $ step t)
 
     -- |Tries to perform multiple steps on the given Expression, if possible.
     tryStepN            :: Int -> Expression -> Maybe ParseTree
-    tryStepN n e        = tryParse e >>= (\x -> Just $ stepN n x)
+    tryStepN n e        = tryParse e >>= (\t -> Just $ stepN n t)
 
     -- |Like tryStepN, but prints the intermediary steps.
-    tryStepNTrace       :: Int -> Expression -> Maybe ParseTree
-    tryStepNTrace n e   = tryParse e >>= (\x -> Just $ stepNTrace (n,0) x)
+    tryTraceN           :: Int -> Expression -> Maybe ParseTree
+    tryTraceN n e       = tryParse e >>= (\t -> Just $ traceN (n,0) t)
+
+    -- |Produces a list of ParseTrees of exactly the given length by iterating
+    -- step on the given Expression.
+    stepNList           :: Int -> ParseTree -> [ParseTree]
+    stepNList n t       = take n $ iterate step t
+
+    -- |Applies stepNList with the given length and Expression, if possible.
+    tryStepNList        :: Int -> Expression -> Maybe [ParseTree]
+    tryStepNList n e    = tryParse e >>= (\t -> Just $ stepNList n t)
+
+    -- |Like tryTraceN, but uses Polish notation for output.
+    tryTraceNPolish     :: Int -> Expression -> Maybe Expression
+    tryTraceNPolish n e = tryParse e >>= (\t ->
+        Just $ fromParseTree $ snd $ last $
+        let f n t       = (show n) ++ ":\t" ++ (show $ fromParseTree t)
+            g (n,t)     = (n + 1, trace (f n t) $ step t)
+        in  takeWhile (\(k,_) -> k - 1 <= n) $ iterate g (0,t))
 
     -- |Tries to reduce the given Expression, if possible.
     tryReduce           :: Expression -> Maybe ParseTree
@@ -264,9 +284,12 @@ where
                           -- |StepN tries the given number of reduction steps on
                           -- the given Expression.
                         | StepN Int Expression
-                          -- |StepNTrace is like StepN, but prints intermediary
+                          -- |TraceN is like StepN, but prints intermediary
                           -- steps in stdout.
-                        | StepNTrace Int Expression
+                        | TraceN Int Expression
+                          -- |TraceNPolish is like TraceN, but uses the Polish
+                          -- (prefix) notation.
+                        | TraceNPolish Int Expression
                           -- |Reduce tries to reduce the given Expression until
                           -- a normal form is obtained or two consecutive steps
                           -- yield identical output.
@@ -274,13 +297,56 @@ where
 
     instance Show Command where
         show c          = case c of
-            Parse e         -> perform tryParse e
-            Decorate e      -> perform tryDecorate e
-            FindRedexes e   -> perform tryRedexes e
-            Analyze e       -> perform tryAnalyze e
-            Step e          -> perform tryStep e
-            StepN n e       -> perform (tryStepN n) e
-            StepNTrace n e  -> perform (tryStepNTrace n) e
-            Reduce e        -> perform tryReduce e
-            _               -> "Unsupported command."
+            Parse e             -> perform tryParse e
+            Decorate e          -> perform tryDecorate e
+            FindRedexes e       -> perform tryRedexes e
+            Analyze e           -> perform tryAnalyze e
+            Step e              -> perform tryStep e
+            StepN n e           -> perform (tryStepN n) e
+            TraceN n e          -> perform (tryTraceN n) e
+            TraceNPolish n e    -> perform (tryTraceNPolish n) e
+            Reduce e            -> perform tryReduce e
+--            _               -> "Unsupported command."
 
+    -- |Omega is the reducible expression (SII)(SII), for which holds that:
+    -- Omega    === (SII)(SII)
+    --          ->w (I(SII))(I(SII))
+    --          ->w (SII)(I(SII))
+    --          ->w (SII)(SII)
+    --          === Omega
+    -- Thus, Omega ->w* Omega. Omega is analogous to (\x->xx)(\x->xx) in LC.
+    -- However, since this interpreter uses normal reduction order, we get:
+    -- Omega    === (SII)(SII)
+    --          ->w (I(SII))(I(SII))
+    --          ->w (SII)(I(SII))
+    --          ->w (I(I(SII)))(I(I(SII)))
+    --          ->w (I(SII))(I(I(SII)))
+    --          ->w (SII)(I(I(SII)))
+    --          ->w (I(I(I(SII))))(I(I(I(SII))))
+    --          ...
+    omega   :: Expression
+    omega   = [A,A,A,S,I,I,A,A,S,I,I]
+
+    -- |Y is a fix point combinator. A fix point combinator is a combinator X
+    -- that satisfies X e = e (X e) for any expression e.
+    y       :: Expression
+    y       = [A,A,S,A,A,S,A,K,A,A,S,S,A,K,A,A,S,I,I,K,A,A,S,A,K,A,A,S,S,A,K,A,A,S,I,I,K]
+
+    -- |Turing's Theta is another fix point combinator.
+    theta   :: Expression
+    theta   = fromString "***S*K**SS*S**SIIK**S*K**SS*S**SIIK"
+
+    -- |The I combinator is extensionally equivalent to SKK.
+    i       :: Expression
+    i       = [A,A,S,K,K]
+
+    -- |T combinator can used for repsesenting truth in an if-then else
+    -- expression. For example, the C-style ternary operator
+    -- <condition> ? <then-branch> : <else-branch> can be encoded simply as
+    -- P <then-branch> <else-branch> where P is either T or F.
+    t       :: Expression
+    t       = [K]
+    -- |F combinator can used for repsesenting falsity in an if-then else
+    -- expression.
+    f       :: Expression
+    f       = [A,K,I]
