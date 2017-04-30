@@ -24,6 +24,9 @@ module ImageGenerator where
     black       :: PixelRGB8
     black       = PixelRGB8   0   0   0
 
+--    gen         :: a -> PixelRGB -> [[a]] -> [Int] -> Int -> PixelRGB
+--    gen colour lines lengths x y = if (lengths !! y > x) then colour ((lines !! y) !! x) else black
+
     -- |Visualizes the reduction process of a CL expression in Polish notation.
     visualize   :: String -> (Int,Int) -> IO()
     visualize expression (width, height) =

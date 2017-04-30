@@ -272,13 +272,39 @@ where
         Just y          -> show y
         Nothing         -> "\"" ++ (show x) ++ "\" is malformed."
 
+    help :: String
+    help = "The supported commands are:\n\n\
+\    \"Parse e\"           Converts e into a ParseTree value. The string\n\
+\                        representation of this value is the expression itself in\n\
+\                        infix notation.\n\
+\    \"Decorate e\"        Converts e into a FancyTree value. The value has a\n\
+\                        tree-like ASCII string representation.\n\
+\    \"FindRedexes e\"     Converts e into a [ParseTree] value containing the\n\
+\                        ParseTree versions of the reducible subexpressions of e.\n\
+\    \"Analyze e\"         Performs Parse, Decorate, and FindRedexes on e.\n\
+\    \"Step e\"            Converts e into a ParseTree value that is the single-\n\
+\                        step w-reduct of e.\n\
+\    \"StepN n e\"         Converts e into a ParseTree value that is the n-step\n\
+\                        w-reduct of e.\n\
+\    \"TraceN n e\"        Converts e into a ParseTree value that is the n-step\n\
+\                        w-reduct of e. Also, the intermediary reduction steps\n\
+\                        are shown.\n\
+\    \"TraceNPolish n e\"  Like TraceN, but uses Polish notation.\n\
+\    \"Reduce e\"          Tries to reduce e into a ParseTree in normal form. This\n\
+\                        operation is partial: If e has no normal form, the\n\
+\                        evaluation never terminates.\n\n\
+\for a well-formed e :: Expression and a non-negative n :: Int."
+
     -- |Command is an algebraic type that is mapped to operations of this
     -- interpreter. Each constructor corresponds with an unique operation. The
     -- outcome of this operation is evaluated when executing "show". The
     -- operations fail on malformed Expressions.
-    data Command        = -- |Parse tries to convert an Expression into a
+    data Command        = -- |Help prints a list of commands along with very
+                          -- short descriptions of them.
+                          Help
+                          -- |Parse tries to convert an Expression into a
                           -- ParseTree
-                          Parse Expression
+                        | Parse Expression
                           -- |Decorate tries to convert an Expression into a
                           -- FancyTree
                         | Decorate Expression
@@ -307,6 +333,7 @@ where
 
     instance Show Command where
         show c          = case c of
+            Help                -> help
             Parse e             -> perform tryParse e
             Decorate e          -> perform tryDecorate e
             FindRedexes e       -> perform tryRedexes e
